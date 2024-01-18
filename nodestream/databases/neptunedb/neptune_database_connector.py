@@ -18,7 +18,7 @@ class NeptuneDBDatabaseConnector(DatabaseConnector, alias="neptunedb"):
         # Make this use boto3
         return cls(
             client = boto3.client('neptunedata', region_name = region, endpoint_url = host),
-            ingest_query_builder=NeptuneDBIngestQueryBuilder(True)
+            ingest_query_builder=NeptuneDBIngestQueryBuilder()
         )
 
     def __init__(
