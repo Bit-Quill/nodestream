@@ -59,7 +59,7 @@ class NeptuneQueryExecutor(QueryExecutor):
         pass
 
     async def execute_hook(self, hook: IngestionHook):
-            pass
+        pass
 
     # not using the async library yet, just testing running neptune queries here
     async def execute(self, query: str, log_result: bool = False):
