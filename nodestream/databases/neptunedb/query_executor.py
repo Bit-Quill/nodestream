@@ -1,6 +1,5 @@
 from logging import getLogger
 from typing import Iterable
-
 from ...model import IngestionHook, Node, RelationshipWithNodes, TimeToLiveConfiguration
 from ...schema.indexes import FieldIndex, KeyIndex
 from ..query_executor import (
@@ -9,8 +8,9 @@ from ..query_executor import (
     QueryExecutor,
 )
 from .ingest_query_builder import NeptuneDBIngestQueryBuilder
-from .query import Query
+from .query import Query, QueryBatch
 from aiobotocore.session import get_session
+import json
 
 
 
@@ -35,8 +35,7 @@ class NeptuneQueryExecutor(QueryExecutor):
                 operation, nodes
             )
         )
-        for query in batched_query:
-            await self.execute(query)
+        await self.execute(batched_query.as_query())
 
     async def upsert_relationships_in_bulk_of_same_operation(
         self,
@@ -48,28 +47,29 @@ class NeptuneQueryExecutor(QueryExecutor):
                 shape, relationships
             )
         )
-        for query in queries:
-            await self.execute(query)
+        await self.execute(queries.as_query())
 
     async def upsert_key_index(self, index: KeyIndex):
-        pass
+        self.logger.warning(f"upsert_key_index not implemented: Neptune does not need to update index keys.")
 
     async def upsert_field_index(self, index: FieldIndex):
-        pass
+        self.logger.warning("upsert_field_index not implemented: Neptune does not need to update index keys.")
 
     async def perform_ttl_op(self, config: TimeToLiveConfiguration):
-        pass
+        self.logger.warning("perform_ttl_op not implemented, no query was executed.")
 
     async def execute_hook(self, hook: IngestionHook):
-        pass
+        self.logger.warning("execute_hook not implemented, no query was executed.")
 
     # not using the async library yet, just testing running neptune queries here
-    async def execute(self, query: str, log_result: bool = False):
-        self.logger.info(f"\n{query}")
+    async def execute(self, query: QueryBatch, log_result: bool = False):
+
         async with self.session.create_client("neptunedata", region_name=self.region, endpoint_url=self.host) as client:
             try:
                 response = await client.execute_open_cypher_query(
-                    openCypherQuery=query,
+                    openCypherQuery=query.query_statement,
+                    # Use json.dumps() to warp dict's key/values in double quotes.
+                    parameters=json.dumps(query.parameters)
                 )
                 self.logger.info(response)
             except Exception as e:
