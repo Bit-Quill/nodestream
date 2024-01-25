@@ -214,17 +214,6 @@ class NeptuneDBIngestQueryBuilder:
         params = [self.generate_update_node_operation_params(node) for node in nodes]
         return QueryBatch(query, params)
 
-    def _place_node_properties(self, query: str, from_node: Node, to_node: Node):
-        query = query.replace(
-            f'{{place : "holder_{FROM_NODE_REF_NAME}"}}',
-            str(_to_string_values(from_node.properties)),
-        )
-        query = query.replace(
-            f'{{place : "holder_{TO_NODE_REF_NAME}"}}',
-            str(_to_string_values(to_node.properties)),
-        )
-        return query
-
     def generate_batch_update_relationship_query_batch(
         self,
         operation: OperationOnRelationshipIdentity,
