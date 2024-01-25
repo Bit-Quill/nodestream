@@ -23,7 +23,11 @@ PROPERTIES_PARAM_NAME = "properties"
 ADDITIONAL_LABELS_PARAM_NAME = "additional_labels"
 GENERIC_NODE_REF_NAME = "node"
 FROM_NODE_REF_NAME = "from_node"
+FROM_NODE_PROPS_REF = {"from_node": "from_ref_props"}
+FROM_NODE_PROPS_REF_STR = str(FROM_NODE_PROPS_REF)
 TO_NODE_REF_NAME = "to_node"
+TO_NODE_PROPS_REF = {"to_node": "to_ref_props"}
+TO_NODE_PROPS_REF_STR = str(TO_NODE_PROPS_REF)
 RELATIONSHIP_REF_NAME = "rel"
 PARAMETER_CORRECTION_REGEX = re.compile(r"\"(params.__\w+)\"")
 DELETE_NODE_QUERY = "MATCH (n) WHERE id(n) = id DETACH DELETE n"
@@ -42,30 +46,26 @@ def correct_parameters(f):
 def generate_prefixed_param_name(property_name: str, prefix: str) -> str:
     return f"__{prefix}_{property_name}"
 
+def generate_id_param_name(node_ref_name: str) -> str:
+    return generate_prefixed_param_name("id", node_ref_name)
+
 
 def generate_properties_set_with_prefix(properties: Iterable[str], prefix: str):
     return {
-        prop: f"params.{generate_prefixed_param_name(prop, prefix)}"
+        prop: f"param.{generate_prefixed_param_name(prop, prefix)}"
         for prop in properties
     }
 
-
-def generate_where_set_with_prefix(properties: frozenset, prefix: str):
-    return {
-        f"{prefix}.{prop}": f"params.{generate_prefixed_param_name(prop, prefix)}"
-        for prop in properties
-    }
-
-
-# @cache
+@cache
 def _match_node(
-    node_operation: OperationOnNodeIdentity, name=GENERIC_NODE_REF_NAME, properties={}
+    node_operation: OperationOnNodeIdentity, name=GENERIC_NODE_REF_NAME
 ) -> NodeAvailable:
     identity = node_operation.node_identity
+    node_id_param_name = generate_id_param_name(name)
     return (
         QueryBuilder()
         .match()
-        .node(labels=identity.type, ref_name=name, properties=_double_quote_values(properties))
+        .node(labels=identity.type, ref_name=name, properties={"`~id`": f"param.{node_id_param_name}"}, escape=False)
     )
 
 
@@ -89,7 +89,7 @@ def _merge_node(
 
 @cache
 def _make_relationship(
-    rel_identity: RelationshipIdentityShape, creation_rule: RelationshipCreationRule
+    rel_identity: RelationshipIdentityShape
 ):
     keys = generate_properties_set_with_prefix(rel_identity.keys, RELATIONSHIP_REF_NAME)
     match_rel_query = (
@@ -106,88 +106,90 @@ def _make_relationship(
 
     return match_rel_query
 
-def _double_quote_values(props: dict):
+
+def _to_string_values(props: dict):
+    # Convert unsupported values to string
     for key in props:
         if isinstance(props[key], Timestamp):
-            props[key] = f"\"{str(props[key])}\""
+            props[key] = str(props[key])
     return props
 
-class NeptuneDBIngestQueryBuilder:
 
-    # @cache
+class NeptuneDBIngestQueryBuilder:
+    @cache
     # @correct_parameters
     def generate_update_node_operation_query_statement(
         self,
         operation: OperationOnNodeIdentity,
-        props: dict,
         ref: str,
     ) -> str:
         """Generate a query to update a node in the database given a node type and a match strategy."""
-        labels = [operation.node_identity.type, *operation.node_identity.additional_types]
-        # labels.append())
-        # TODO: update keys as well
-        keys = operation.node_identity.keys
-        print(labels)
-        _double_quote_values(props)
-        query = (QueryBuilder()
-                 .merge()
-                 .node(labels=labels, ref_name=ref, properties=props)
+        labels = [
+            operation.node_identity.type,
+            *operation.node_identity.additional_types,
+        
+        ]
+        node_id_param_name = generate_id_param_name(GENERIC_NODE_REF_NAME)
+
+        merge_node = (
+            QueryBuilder()
+            .merge()
+            .node(
+                labels=labels,
+                ref_name=ref,
+                properties={"`~id`": f"param.{node_id_param_name}"},
+                escape=False
+            )
         )
+        on_create = f"ON CREATE SET {GENERIC_NODE_REF_NAME} = param"
+        on_match = f"ON MATCH SET {GENERIC_NODE_REF_NAME} += param"
+        query = f"{merge_node} {on_create} {on_match}"
         return query
 
     def generate_update_node_operation_params(self, node: Node) -> dict:
         """Generate the parameters for a query to update a node in the database."""
 
-        params = self.generate_node_key_params(node)
-        params[
-            generate_prefixed_param_name(PROPERTIES_PARAM_NAME, GENERIC_NODE_REF_NAME)
-        ] = node.properties
-        params[
-            generate_prefixed_param_name(
-                ADDITIONAL_LABELS_PARAM_NAME, GENERIC_NODE_REF_NAME
-            )
-        ] = node.additional_types
+        node_props = {**self.generate_node_key_params(node), **node.properties}
+        node_props = _to_string_values(node_props)
 
-        return params
+        return node_props
 
     def generate_node_key_params(self, node: Node, name=GENERIC_NODE_REF_NAME) -> dict:
         """Generate the parameters for a query to update a node in the database."""
+        # Todo: What if no keys were given? Maybe let neptune decides.
+        composite_key = "_".join([str(node.key_values[k]) for k in node.key_values])
+        return {generate_prefixed_param_name("id", name): composite_key}
 
-        return {
-            generate_prefixed_param_name(k, name): v for k, v in node.key_values.items()
-        }
-
-    # @cache
-    # @correct_parameters
+    @cache
+    @correct_parameters
     def generate_update_relationship_operation_query_statement(
-        self,
-        operation: OperationOnRelationshipIdentity,
-        from_node: Node,
-        to_node: Node
+        self, operation: OperationOnRelationshipIdentity
     ) -> str:
         """Generate a query to update a relationship in the database given a relationship operation."""
 
-        match_from_node_segment = _match_node(operation.from_node, FROM_NODE_REF_NAME, {**from_node.key_values, **from_node.properties})
-        match_to_node_segment = _match_node(operation.to_node, TO_NODE_REF_NAME, {**to_node.key_values, **to_node.properties})
+        match_from_node_segment = _match_node(
+            operation.from_node,
+            FROM_NODE_REF_NAME
+        )
+
+        match_to_node_segment = _match_node(
+            operation.to_node,
+            TO_NODE_REF_NAME
+        )
         match_to_node_segment = str(match_to_node_segment).replace("MATCH", ",")
 
-        merge_rel_segment = _make_relationship(
-            operation.relationship_identity, operation.relationship_creation_rule
-        )
-        return f"{match_from_node_segment} {match_to_node_segment} {merge_rel_segment}"
+        merge_rel_segment = _make_relationship(operation.relationship_identity)
+
+        on_create = f"ON CREATE SET {RELATIONSHIP_REF_NAME} = param"
+
+        on_match = f"ON MATCH SET {RELATIONSHIP_REF_NAME} += param"
+
+        return f"{match_from_node_segment} {match_to_node_segment} {merge_rel_segment} {on_create} {on_match}"
 
     def generate_update_rel_params(self, rel: Relationship) -> dict:
         """Generate the parameters for a query to update a relationship in the database."""
 
-        params = {
-            generate_prefixed_param_name(k, RELATIONSHIP_REF_NAME): v
-            for k, v in rel.key_values.items()
-        }
-        params[
-            generate_prefixed_param_name(PROPERTIES_PARAM_NAME, RELATIONSHIP_REF_NAME)
-        ] = rel.properties
-
-        return params
+        return _to_string_values({**rel.key_values, **rel.properties})
 
     def generate_update_rel_between_nodes_params(
         self, rel: RelationshipWithNodes
@@ -203,71 +205,46 @@ class NeptuneDBIngestQueryBuilder:
         self,
         operation: OperationOnNodeIdentity,
         nodes: Iterable[Node],
-    ) -> list[str]:
+    ) -> QueryBatch:
         """Generate a batch of queries to update nodes in the database in the same way of the same type."""
-        def place_node_properties(node: str, props):
-            # return node.replace("{place : holder}", json.dumps(props))
-            return node
-    
-        queries = [
-            place_node_properties(
-                    str(self.generate_update_node_operation_query_statement(operation=operation, props={**node.key_values, **node.properties}, ref=f'p{idx}')),
-                {**node.key_values, **node.properties}) 
-            for idx, node in enumerate(nodes)]
-        return queries
+        query = self.generate_update_node_operation_query_statement(
+            operation=operation, ref=GENERIC_NODE_REF_NAME
+        )
+
+        params = [self.generate_update_node_operation_params(node) for node in nodes]
+        return QueryBatch(query, params)
 
     def _place_node_properties(self, query: str, from_node: Node, to_node: Node):
-        query = query.replace(f"{{place : \"holder_{FROM_NODE_REF_NAME}\"}}", str(_double_quote_values(from_node.properties)))
-        query = query.replace(f"{{place : \"holder_{TO_NODE_REF_NAME}\"}}", str(_double_quote_values(to_node.properties)))
+        query = query.replace(
+            f'{{place : "holder_{FROM_NODE_REF_NAME}"}}',
+            str(_to_string_values(from_node.properties)),
+        )
+        query = query.replace(
+            f'{{place : "holder_{TO_NODE_REF_NAME}"}}',
+            str(_to_string_values(to_node.properties)),
+        )
         return query
-    
+
     def generate_batch_update_relationship_query_batch(
         self,
         operation: OperationOnRelationshipIdentity,
         relationships: Iterable[RelationshipWithNodes],
     ) -> QueryBatch:
         """Generate a batch of queries to update relationships in the database in the same way of the same type."""
-        queries = [
-            self.generate_update_relationship_operation_query_statement(operation, rel.from_node, rel.to_node) for rel in relationships
+        query_stmt = self.generate_update_relationship_operation_query_statement(operation)
+        params = [
+            self.generate_update_rel_between_nodes_params(rel) for rel in relationships
         ]
-        return queries
+
+        return QueryBatch(
+            query_stmt,
+            params
+        )
 
     def generate_ttl_match_query(self, config: TimeToLiveConfiguration) -> Query:
-        earliest_allowed_time = datetime.utcnow() - timedelta(
-            hours=config.expiry_in_hours
-        )
-        params = {"earliest_allowed_time": earliest_allowed_time}
-        if config.custom_query is not None:
-            return Query(config.custom_query, params)
-
-        query_builder = QueryBuilder()
-        ref_name = "x"
-
-        if config.graph_object_type == GraphObjectType.NODE:
-            query_builder = query_builder.match().node(
-                labels=config.object_type, ref_name=ref_name
-            )
-        else:
-            query_builder = (
-                query_builder.match()
-                .node()
-                .related_to(label=config.object_type, ref_name=ref_name)
-                .node()
-            )
-
-        query_builder = query_builder.where_literal(
-            f"{ref_name}.last_ingested_at <= $earliest_allowed_time"
-        ).return_literal(f"id({ref_name}) as id")
-
-        return Query(str(query_builder), params)
+        pass
 
     def generate_ttl_query_from_configuration(
         self, config: TimeToLiveConfiguration
     ) -> Query:
-        ttl_match_query = self.generate_ttl_match_query(config)
-        operation = (
-            DELETE_NODE_QUERY
-            if config.graph_object_type == GraphObjectType.NODE
-            else DELETE_REL_QUERY
-        )
-        return ttl_match_query.feed_batched_query(operation)
+        pass

@@ -2,7 +2,7 @@ from logging import getLogger
 from typing import Iterable
 from botocore.session import get_session
 import botocore.client
-
+import json
 from ...model import IngestionHook, Node, RelationshipWithNodes, TimeToLiveConfiguration
 from ...schema.indexes import FieldIndex, KeyIndex
 from ..query_executor import (
@@ -11,15 +11,12 @@ from ..query_executor import (
     QueryExecutor,
 )
 from .ingest_query_builder import NeptuneDBIngestQueryBuilder
-from .query import Query
-
+from .query import Query, QueryBatch
 
 
 class NeptuneQueryExecutor(QueryExecutor):
     def __init__(
-        self,
-        client: botocore.client,
-        ingest_query_builder: NeptuneDBIngestQueryBuilder
+        self, client: botocore.client, ingest_query_builder: NeptuneDBIngestQueryBuilder
     ) -> None:
         self.client = client
         self.ingest_query_builder = ingest_query_builder
@@ -33,8 +30,9 @@ class NeptuneQueryExecutor(QueryExecutor):
                 operation, nodes
             )
         )
-        for query in batched_query:
-            await self.execute(query)
+        # self.logger.info(batched_query.query_statement)
+        # self.logger.warning(str(batched_query.parameters))
+        await self.execute(batched_query.as_query())
 
     async def upsert_relationships_in_bulk_of_same_operation(
         self,
@@ -46,8 +44,7 @@ class NeptuneQueryExecutor(QueryExecutor):
                 shape, relationships
             )
         )
-        for query in queries:
-            await self.execute(query)
+        await self.execute(queries.as_query())
 
     async def upsert_key_index(self, index: KeyIndex):
         pass
@@ -62,20 +59,21 @@ class NeptuneQueryExecutor(QueryExecutor):
         pass
 
     # not using the async library yet, just testing running neptune queries here
-    async def execute(self, query: str, log_result: bool = False):
-        self.logger.info(f"\n{query}")
+    async def execute(self, query: Query, log_result: bool = False):
+        self.logger.info(query.query_statement)
+        self.logger.info(json.dumps(query.parameters))
         try:
             response = self.client.execute_open_cypher_query(
-                openCypherQuery=query,
+                openCypherQuery=query.query_statement,
+                parameters=json.dumps(query.parameters)
             )
             self.logger.info(response)
         except Exception as e:
-            self.logger.error(f'Failed at query: {query}')
+            self.logger.error(f"Failed at query: {query}")
             raise e
-        return 
+        return
         response = await self.client.execute_open_cypher_query(
-                    openCypherQuery=query,
-                )
-        
+            openCypherQuery=query,
+        )
 
         self.logger.info(response)

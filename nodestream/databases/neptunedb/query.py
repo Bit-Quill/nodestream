@@ -19,6 +19,10 @@ YIELD value
 RETURN value
 """
 
+UNWIND_COMMIT_QUERY = """
+UNWIND $params as param
+"""
+
 
 @dataclass(slots=True, frozen=True)
 class Query:
@@ -44,16 +48,12 @@ class Query:
 @dataclass(slots=True, frozen=True)
 class QueryBatch:
     query_statement: str
-    batched_parameter_sets: List[Dict[str, Any]]
+    parameters: List[Dict[str, Any]]
 
-    def as_query(self, apoc_iterate: bool) -> Query:
+    def as_query(self) -> Query:
         return Query(
-            {True: COMMIT_QUERY, False: NON_APOCH_COMMIT_QUERY}[apoc_iterate],
+            f"{UNWIND_COMMIT_QUERY}{self.query_statement}",
             {
-                "iterate_params": {
-                    "batched_parameter_sets": self.batched_parameter_sets
-                },
-                "batched_query": self.query_statement,
-                "iterable_query": UNWIND_QUERY,
+                "params": self.parameters,
             },
         )
