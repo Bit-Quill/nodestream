@@ -1,7 +1,5 @@
 from logging import getLogger
 from typing import Iterable
-from botocore.session import get_session
-import botocore.client
 
 from ...model import IngestionHook, Node, RelationshipWithNodes, TimeToLiveConfiguration
 from ...schema.indexes import FieldIndex, KeyIndex
@@ -12,16 +10,20 @@ from ..query_executor import (
 )
 from .ingest_query_builder import NeptuneDBIngestQueryBuilder
 from .query import Query
+from aiobotocore.session import get_session
 
 
 
 class NeptuneQueryExecutor(QueryExecutor):
     def __init__(
         self,
-        client: botocore.client,
+        region,
+        host,
         ingest_query_builder: NeptuneDBIngestQueryBuilder
     ) -> None:
-        self.client = client
+        self.session = get_session()
+        self.region = region
+        self.host = host
         self.ingest_query_builder = ingest_query_builder
         self.logger = getLogger(self.__class__.__name__)
 
@@ -64,18 +66,12 @@ class NeptuneQueryExecutor(QueryExecutor):
     # not using the async library yet, just testing running neptune queries here
     async def execute(self, query: str, log_result: bool = False):
         self.logger.info(f"\n{query}")
-        try:
-            response = self.client.execute_open_cypher_query(
-                openCypherQuery=query,
-            )
-            self.logger.info(response)
-        except Exception as e:
-            self.logger.error(f'Failed at query: {query}')
-            raise e
-        return 
-        response = await self.client.execute_open_cypher_query(
+        async with self.session.create_client("neptunedata", region_name=self.region, endpoint_url=self.host) as client:
+            try:
+                response = await client.execute_open_cypher_query(
                     openCypherQuery=query,
                 )
-        
-
-        self.logger.info(response)
+                self.logger.info(response)
+            except Exception as e:
+                self.logger.error(f'Failed at query: {query}')
+                raise e

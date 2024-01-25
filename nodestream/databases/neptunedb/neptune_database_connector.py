@@ -17,24 +17,28 @@ class NeptuneDBDatabaseConnector(DatabaseConnector, alias="neptunedb"):
     ):
         # Make this use boto3
         return cls(
-            client = boto3.client('neptunedata', region_name = region, endpoint_url = host),
+            host=host,
+            region=region,
             ingest_query_builder=NeptuneDBIngestQueryBuilder()
         )
 
     def __init__(
         self,
-        client,
+        region,
+        host,
         ingest_query_builder: NeptuneDBIngestQueryBuilder
     ) -> None:
-        self.client = client
+        self.host = host
+        self.region = region
         self.ingest_query_builder = ingest_query_builder
 
     def make_query_executor(self) -> QueryExecutor:
         from .query_executor import NeptuneQueryExecutor
 
         return NeptuneQueryExecutor(
-            self.client,
-            self.ingest_query_builder
+            host=self.host,
+            region=self.region,
+            ingest_query_builder=self.ingest_query_builder
         )
 
     def make_type_retriever(self) -> TypeRetriever:
