@@ -117,7 +117,7 @@ def _to_string_values(props: dict):
 
 class NeptuneDBIngestQueryBuilder:
     @cache
-    # @correct_parameters
+    @correct_parameters
     def generate_update_node_operation_query_statement(
         self,
         operation: OperationOnNodeIdentity,
@@ -242,9 +242,9 @@ class NeptuneDBIngestQueryBuilder:
         )
 
     def generate_ttl_match_query(self, config: TimeToLiveConfiguration) -> Query:
-        pass
+        raise NotImplementedError
 
     def generate_ttl_query_from_configuration(
         self, config: TimeToLiveConfiguration
     ) -> Query:
-        pass
+        raise NotImplementedError
