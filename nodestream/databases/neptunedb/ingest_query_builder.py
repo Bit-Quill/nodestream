@@ -68,11 +68,15 @@ def _match_node(
         .node(labels=identity.type, ref_name=name, properties={"`~id`": f"param.{node_id_param_name}"}, escape=False)
     )
 
+@cache
+def _generate_node_id_property(node_id_param_name: str) -> dict:
+    return {"`~id`": f"param.{node_id_param_name}"}
 
 @cache
 def _merge_node(
     node_operation: OperationOnNodeIdentity, name=GENERIC_NODE_REF_NAME
 ) -> NodeAfterMergeAvailable:
+    node_id_param_name = generate_id_param_name(GENERIC_NODE_REF_NAME)
     properties = generate_properties_set_with_prefix(
         node_operation.node_identity.keys, name
     )
@@ -82,7 +86,8 @@ def _merge_node(
         .node(
             labels=node_operation.node_identity.type,
             ref_name=name,
-            properties=properties,
+            properties=_generate_node_id_property(node_id_param_name),
+            escape=False
         )
     )
 
@@ -109,9 +114,12 @@ def _make_relationship(
 
 def _to_string_values(props: dict):
     # Convert unsupported values to string
-    for key in props:
-        if isinstance(props[key], Timestamp):
-            props[key] = str(props[key])
+    for k, v in props.items():
+        if isinstance(v, Timestamp):
+            props[k] = str(v)
+        elif not v:
+            props[k] = ''
+
     return props
 
 
@@ -158,6 +166,7 @@ class NeptuneDBIngestQueryBuilder:
         """Generate the parameters for a query to update a node in the database."""
         # Todo: What if no keys were given? Maybe let neptune decides.
         composite_key = "_".join([str(node.key_values[k]) for k in node.key_values])
+        composite_key = f"{node.type}_{composite_key}"
         return {generate_prefixed_param_name("id", name): composite_key}
 
     @cache
