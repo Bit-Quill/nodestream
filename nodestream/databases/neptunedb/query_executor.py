@@ -13,7 +13,6 @@ from aiobotocore.session import get_session
 import json
 
 
-
 class NeptuneQueryExecutor(QueryExecutor):
     def __init__(
         self,
@@ -50,20 +49,19 @@ class NeptuneQueryExecutor(QueryExecutor):
         await self.execute(queries.as_query())
 
     async def upsert_key_index(self, index: KeyIndex):
-        self.logger.warning(f"upsert_key_index not implemented: Neptune does not need to update index keys.")
+        pass
 
     async def upsert_field_index(self, index: FieldIndex):
-        self.logger.warning("upsert_field_index not implemented: Neptune does not need to update index keys.")
+        pass
 
     async def perform_ttl_op(self, config: TimeToLiveConfiguration):
-        self.logger.warning("perform_ttl_op not implemented, no query was executed.")
+        pass
 
     async def execute_hook(self, hook: IngestionHook):
-        self.logger.warning("execute_hook not implemented, no query was executed.")
+        pass
 
     # not using the async library yet, just testing running neptune queries here
-    async def execute(self, query: QueryBatch, log_result: bool = False):
-
+    async def execute(self, query: Query, log_result: bool = False):
         async with self.session.create_client("neptunedata", region_name=self.region, endpoint_url=self.host) as client:
             try:
                 response = await client.execute_open_cypher_query(
@@ -71,7 +69,7 @@ class NeptuneQueryExecutor(QueryExecutor):
                     # Use json.dumps() to warp dict's key/values in double quotes.
                     parameters=json.dumps(query.parameters)
                 )
-                self.logger.info(response)
+                self.logger.debug(response)
             except Exception as e:
-                self.logger.error(f'Failed at query: {query}')
+                self.logger.error(f'Failed at query: {query}.')
                 raise e
