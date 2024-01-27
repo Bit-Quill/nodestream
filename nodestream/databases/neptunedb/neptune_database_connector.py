@@ -19,6 +19,7 @@ class NeptuneDBDatabaseConnector(DatabaseConnector, alias="neptunedb"):
         return cls(
             host=host,
             region=region,
+            async_partitions=kwargs.get("async_partitions"),
             ingest_query_builder=NeptuneDBIngestQueryBuilder()
         )
 
@@ -26,11 +27,13 @@ class NeptuneDBDatabaseConnector(DatabaseConnector, alias="neptunedb"):
         self,
         region,
         host,
+        async_partitions,
         ingest_query_builder: NeptuneDBIngestQueryBuilder
     ) -> None:
         self.host = host
         self.region = region
         self.ingest_query_builder = ingest_query_builder
+        self.async_partitions = async_partitions
 
     def make_query_executor(self) -> QueryExecutor:
         from .query_executor import NeptuneQueryExecutor
@@ -38,7 +41,8 @@ class NeptuneDBDatabaseConnector(DatabaseConnector, alias="neptunedb"):
         return NeptuneQueryExecutor(
             host=self.host,
             region=self.region,
-            ingest_query_builder=self.ingest_query_builder
+            ingest_query_builder=self.ingest_query_builder,
+            async_partitions=self.async_partitions
         )
 
     def make_type_retriever(self) -> TypeRetriever:
