@@ -1,4 +1,6 @@
 import re
+import math
+import numbers
 from pandas import Timestamp
 from datetime import datetime, timedelta
 from functools import cache, wraps
@@ -118,7 +120,9 @@ def _to_string_values(props: dict):
         if isinstance(v, Timestamp):
             props[k] = str(v)
         elif not v:
-            props[k] = ''
+            props[k] = 'None'
+        elif isinstance(v, numbers.Number) and math.isnan(v):
+            props[k] = "NaN"
 
     return props
 

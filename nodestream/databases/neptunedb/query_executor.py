@@ -11,6 +11,8 @@ from .ingest_query_builder import NeptuneDBIngestQueryBuilder
 from .query import Query, QueryBatch
 from aiobotocore.session import get_session
 import json
+import asyncio
+import math
 
 
 class NeptuneQueryExecutor(QueryExecutor):
@@ -18,14 +20,15 @@ class NeptuneQueryExecutor(QueryExecutor):
         self,
         region,
         host,
-        ingest_query_builder: NeptuneDBIngestQueryBuilder
+        ingest_query_builder: NeptuneDBIngestQueryBuilder,
+        async_partitions = 50
     ) -> None:
         self.session = get_session()
         self.region = region
         self.host = host
         self.ingest_query_builder = ingest_query_builder
         self.logger = getLogger(self.__class__.__name__)
-
+        self.async_partitions = async_partitions
     async def upsert_nodes_in_bulk_with_same_operation(
         self, operation: OperationOnNodeIdentity, nodes: Iterable[Node]
     ):
@@ -60,16 +63,36 @@ class NeptuneQueryExecutor(QueryExecutor):
     async def execute_hook(self, hook: IngestionHook):
         pass
 
-    # not using the async library yet, just testing running neptune queries here
-    async def execute(self, query: Query, log_result: bool = False):
+    def _split_parameters(self, parameters: list):
+        params_count = len(parameters)
+        if not self.async_partitions or params_count < self.async_partitions:
+            partition_size = len(parameters)
+        else:
+            partition_size = math.floor(params_count/self.async_partitions)
+
+        for i in range(0, len(parameters), partition_size):
+            yield parameters[i: i+partition_size]
+
+    async def _make_request(self, query: Query, parameters: list):
         async with self.session.create_client("neptunedata", region_name=self.region, endpoint_url=self.host) as client:
             try:
                 response = await client.execute_open_cypher_query(
                     openCypherQuery=query.query_statement,
                     # Use json.dumps() to warp dict's key/values in double quotes.
-                    parameters=json.dumps(query.parameters)
+                    parameters=json.dumps({"params": parameters})
                 )
-                self.logger.debug(response)
-            except Exception as e:
-                self.logger.error(f'Failed at query: {query}.')
-                raise e
+
+                code = response["ResponseMetadata"]["HTTPStatusCode"]
+                if code != 200:
+                    self.logger.error(f"Query `{query}` failed with response:\n{response}")
+                
+            except Exception:
+                self.logger.exception(f'Unexpected error for query: {query}.', stack_info=True)
+
+    async def execute(self, query: Query, log_result: bool = False):
+        requests = (
+            self._make_request(query, parameters) 
+            for parameters
+            in self._split_parameters(query.parameters["params"])
+        )
+        await asyncio.gather(*requests)
