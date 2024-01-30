@@ -21,19 +21,11 @@ from ...schema.schema import GraphObjectType
 from ..query_executor import OperationOnNodeIdentity, OperationOnRelationshipIdentity
 from .query import Query, QueryBatch
 
-PROPERTIES_PARAM_NAME = "properties"
-ADDITIONAL_LABELS_PARAM_NAME = "additional_labels"
 GENERIC_NODE_REF_NAME = "node"
-FROM_NODE_REF_NAME = "from_node"
-FROM_NODE_PROPS_REF = {"from_node": "from_ref_props"}
-FROM_NODE_PROPS_REF_STR = str(FROM_NODE_PROPS_REF)
-TO_NODE_REF_NAME = "to_node"
-TO_NODE_PROPS_REF = {"to_node": "to_ref_props"}
-TO_NODE_PROPS_REF_STR = str(TO_NODE_PROPS_REF)
+GENERIC_FROM_NODE_REF_NAME = "from_node"
+GENERIC_TO_NODE_REF_NAME = "to_node"
 RELATIONSHIP_REF_NAME = "rel"
 PARAMETER_CORRECTION_REGEX = re.compile(r"\"(params.__\w+)\"")
-DELETE_NODE_QUERY = "MATCH (n) WHERE id(n) = id DETACH DELETE n"
-DELETE_REL_QUERY = "MATCH ()-[r]->() WHERE id(r) = id DELETE r"
 
 
 def correct_parameters(f):
@@ -89,13 +81,13 @@ def _make_relationship(
     match_rel_query = (
         QueryBuilder()
         .merge()
-        .node(ref_name=FROM_NODE_REF_NAME)
+        .node(ref_name=GENERIC_FROM_NODE_REF_NAME)
         .related_to(
             ref_name=RELATIONSHIP_REF_NAME,
             properties=keys,
             label=rel_identity.type,
         )
-        .node(ref_name=TO_NODE_REF_NAME)
+        .node(ref_name=GENERIC_TO_NODE_REF_NAME)
     )
 
     return match_rel_query
@@ -137,12 +129,14 @@ class NeptuneDBIngestQueryBuilder:
 
         """
         At this time, Neptune doesn't support nested maps very well.
-        We get an error trying to reference an inner map in our openCypher query. 
-        As such, __node_id has to be kept at the same level as other node
-        properties. 
+        We get an error trying to access inner maps in the parameters
+        of our openCypher query. 
+        
+        As such, node's properties and __node_id has to be kept at 
+        the same level.
 
-        removeKeyFromMap is a Neptune specific function. We use it to remove 
-         __node_id before setting node's properties
+        As a work around, we use removeKeyFromMap() to remove __node_id before 
+        setting node's properties. removeKeyFromMap() Neptune specific.
         """
         on_create = f"""ON CREATE SET {GENERIC_NODE_REF_NAME} = removeKeyFromMap(param, "{node_id_param_name}")"""
         on_match = f"""ON MATCH SET {GENERIC_NODE_REF_NAME} += removeKeyFromMap(param, "{node_id_param_name}")"""
@@ -172,18 +166,18 @@ class NeptuneDBIngestQueryBuilder:
         self, operation: OperationOnRelationshipIdentity
     ) -> str:
         """Generate a query to update a relationship in the database given a relationship operation."""
-        from_node_id_param_name = generate_id_param_name(FROM_NODE_REF_NAME)
+        from_node_id_param_name = generate_id_param_name(GENERIC_FROM_NODE_REF_NAME)
         match_from_node_segment = _match_node(
             operation.from_node,
             from_node_id_param_name,
-            FROM_NODE_REF_NAME
+            GENERIC_FROM_NODE_REF_NAME
         )
 
-        to_node_id_param_name = generate_id_param_name(TO_NODE_REF_NAME)
+        to_node_id_param_name = generate_id_param_name(GENERIC_TO_NODE_REF_NAME)
         match_to_node_segment = _match_node(
             operation.to_node,
             to_node_id_param_name,
-            TO_NODE_REF_NAME
+            GENERIC_TO_NODE_REF_NAME
         )
 
         match_to_node_segment = str(match_to_node_segment).replace("MATCH", ",")
@@ -209,8 +203,8 @@ class NeptuneDBIngestQueryBuilder:
         """Generate the parameters for a query to update a relationship in the database."""
 
         params = self.generate_update_rel_params(rel.relationship)
-        params.update(self.generate_node_key_params(rel.from_node, FROM_NODE_REF_NAME))
-        params.update(self.generate_node_key_params(rel.to_node, TO_NODE_REF_NAME))
+        params.update(self.generate_node_key_params(rel.from_node, GENERIC_FROM_NODE_REF_NAME))
+        params.update(self.generate_node_key_params(rel.to_node, GENERIC_TO_NODE_REF_NAME))
         return params
   
     def generate_batch_update_node_operation_batch(
