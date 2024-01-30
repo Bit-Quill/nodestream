@@ -212,7 +212,7 @@ class NeptuneDBIngestQueryBuilder:
         params.update(self.generate_node_key_params(rel.from_node, FROM_NODE_REF_NAME))
         params.update(self.generate_node_key_params(rel.to_node, TO_NODE_REF_NAME))
         return params
-
+  
     def generate_batch_update_node_operation_batch(
         self,
         operation: OperationOnNodeIdentity,
