@@ -80,7 +80,6 @@ class ParquetFileFormat(SupportedFileFormat, alias=".parquet"):
         df = pd.read_parquet(fp, engine='pyarrow')
 
         return  df.to_dict(orient="records")
-        # return  df[df['elevation_ft'].notna()].to_dict(orient="records")
 
 
 
