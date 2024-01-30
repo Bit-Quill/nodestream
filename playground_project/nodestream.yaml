@@ -17,3 +17,9 @@ targets:
     username: neo4j
     password: neo4j123
     uri: bolt://localhost:7688
+  db-nept:
+    database: neptunedb
+    database_name: neptunedb
+    host: https://parquet-loader-test.cluster-cjiepzx2kerx.us-west-2.neptune.amazonaws.com:8182
+    region: us-west-2
+    uri: https://parquet-loader-test.cluster-cjiepzx2kerx.us-west-2.neptune.amazonaws.com:8182

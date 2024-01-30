@@ -39,6 +39,7 @@ boto3 = "^1.26.137"
 confluent-kafka = "^2.3.0"
 Jinja2 = "^3"
 pandas = "^2"
+pyarrow = "^15.0.0"
 schema = "^0.7.5"
 cookiecutter = "^2.1.1"
 httpx = "^0.24.1"
@@ -97,7 +98,7 @@ nodestream = 'nodestream.cli.application:run'
 "commands" = "nodestream.cli.commands"                      
 "audits" = "nodestream.project.audits"                      
 "schema_printers" = "nodestream.schema.printers"
-"databases" = "nodestream.databases.neo4j"
+"databases" = "nodestream.databases.neptunedb"
 
 [tool.ruff]
 ignore = ["E501"]
