@@ -52,9 +52,11 @@ class NeptuneQueryExecutor(QueryExecutor):
         await self.execute(queries.as_query())
 
     async def upsert_key_index(self, index: KeyIndex):
+        # Not needed for Neptune
         pass
 
     async def upsert_field_index(self, index: FieldIndex):
+        # Not needed for Neptune
         pass
 
     async def perform_ttl_op(self, config: TimeToLiveConfiguration):
@@ -69,7 +71,7 @@ class NeptuneQueryExecutor(QueryExecutor):
             partition_size = len(parameters)
         else:
             partition_size = math.floor(params_count/self.async_partitions)
-
+        partition_size = 200
         for i in range(0, len(parameters), partition_size):
             yield parameters[i: i+partition_size]
 

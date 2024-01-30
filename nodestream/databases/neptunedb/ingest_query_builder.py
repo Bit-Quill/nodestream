@@ -60,10 +60,9 @@ def generate_properties_set_with_prefix(properties: Iterable[str], prefix: str):
 
 @cache
 def _match_node(
-    node_operation: OperationOnNodeIdentity, name=GENERIC_NODE_REF_NAME
+    node_operation: OperationOnNodeIdentity, node_id_param_name: str, name=GENERIC_NODE_REF_NAME
 ) -> NodeAvailable:
     identity = node_operation.node_identity
-    node_id_param_name = generate_id_param_name(name)
     return (
         QueryBuilder()
         .match()
@@ -71,28 +70,16 @@ def _match_node(
     )
 
 @cache
-def _generate_node_id_property(node_id_param_name: str) -> dict:
-    return {"`~id`": f"param.{node_id_param_name}"}
-
-@cache
-def _merge_node(
-    node_operation: OperationOnNodeIdentity, name=GENERIC_NODE_REF_NAME
-) -> NodeAfterMergeAvailable:
-    node_id_param_name = generate_id_param_name(GENERIC_NODE_REF_NAME)
-    properties = generate_properties_set_with_prefix(
-        node_operation.node_identity.keys, name
-    )
-    return (
-        QueryBuilder()
-        .merge()
-        .node(
-            labels=node_operation.node_identity.type,
-            ref_name=name,
-            properties=_generate_node_id_property(node_id_param_name),
-            escape=False
+def _merge_node(labels: str, node_id_param_name: str, name=GENERIC_NODE_REF_NAME) -> NodeAfterMergeAvailable:
+    return (QueryBuilder()
+            .merge()
+            .node(
+                labels=labels,
+                ref_name=name,
+                properties={"`~id`": f"param.{node_id_param_name}"},
+                escape=False
+            )
         )
-    )
-
 
 @cache
 def _make_relationship(
@@ -115,10 +102,15 @@ def _make_relationship(
 
 
 def _to_string_values(props: dict):
-    # Convert unsupported values to string
+    # Convert unsupported values to string.
+    # There must be better ways to handle these.
+    # It's here only for the PoC.
     for k, v in props.items():
+        # Neptune can handles datetime type
+        # see: https://docs.aws.amazon.com/neptune/latest/userguide/feature-opencypher-compliance.html#opencypher-compliance-differences
         if isinstance(v, Timestamp):
             props[k] = str(v)
+        # Could the nodestream filter/transforms these values else where?
         elif not v:
             props[k] = 'None'
         elif isinstance(v, numbers.Number) and math.isnan(v):
@@ -136,25 +128,24 @@ class NeptuneDBIngestQueryBuilder:
         ref: str,
     ) -> str:
         """Generate a query to update a node in the database given a node type and a match strategy."""
-        labels = [
+        labels = ":".join([
             operation.node_identity.type,
             *operation.node_identity.additional_types,
-        
-        ]
+        ])
         node_id_param_name = generate_id_param_name(GENERIC_NODE_REF_NAME)
+        merge_node = _merge_node(labels, node_id_param_name, GENERIC_NODE_REF_NAME)
 
-        merge_node = (
-            QueryBuilder()
-            .merge()
-            .node(
-                labels=labels,
-                ref_name=ref,
-                properties={"`~id`": f"param.{node_id_param_name}"},
-                escape=False
-            )
-        )
-        on_create = f"ON CREATE SET {GENERIC_NODE_REF_NAME} = param"
-        on_match = f"ON MATCH SET {GENERIC_NODE_REF_NAME} += param"
+        """
+        At this time, Neptune doesn't support nested maps very well.
+        We get an error trying to reference an inner map in our openCypher query. 
+        As such, __node_id has to be kept at the same level as other node
+        properties. 
+
+        removeKeyFromMap is a Neptune specific function. We use it to remove 
+         __node_id before setting node's properties
+        """
+        on_create = f"""ON CREATE SET {GENERIC_NODE_REF_NAME} = removeKeyFromMap(param, "{node_id_param_name}")"""
+        on_match = f"""ON MATCH SET {GENERIC_NODE_REF_NAME} += removeKeyFromMap(param, "{node_id_param_name}")"""
         query = f"{merge_node} {on_create} {on_match}"
         return query
 
@@ -168,7 +159,9 @@ class NeptuneDBIngestQueryBuilder:
 
     def generate_node_key_params(self, node: Node, name=GENERIC_NODE_REF_NAME) -> dict:
         """Generate the parameters for a query to update a node in the database."""
+
         # Todo: What if no keys were given? Maybe let neptune decides.
+        # On uniqueness and keys in Neptune, see Schema Constraints in https://docs.aws.amazon.com/neptune/latest/userguide/migration-compatibility.html
         composite_key = "_".join([str(node.key_values[k]) for k in node.key_values])
         composite_key = f"{node.type}_{composite_key}"
         return {generate_prefixed_param_name("id", name): composite_key}
@@ -179,23 +172,29 @@ class NeptuneDBIngestQueryBuilder:
         self, operation: OperationOnRelationshipIdentity
     ) -> str:
         """Generate a query to update a relationship in the database given a relationship operation."""
-
+        from_node_id_param_name = generate_id_param_name(FROM_NODE_REF_NAME)
         match_from_node_segment = _match_node(
             operation.from_node,
+            from_node_id_param_name,
             FROM_NODE_REF_NAME
         )
 
+        to_node_id_param_name = generate_id_param_name(TO_NODE_REF_NAME)
         match_to_node_segment = _match_node(
             operation.to_node,
+            to_node_id_param_name,
             TO_NODE_REF_NAME
         )
+
         match_to_node_segment = str(match_to_node_segment).replace("MATCH", ",")
 
         merge_rel_segment = _make_relationship(operation.relationship_identity)
 
-        on_create = f"ON CREATE SET {RELATIONSHIP_REF_NAME} = param"
+        # At this time, Neptune doesn't support nested maps very well.
+        # See comments in generate_update_node_operation_query_statement()
+        on_create = f"""ON CREATE SET {RELATIONSHIP_REF_NAME} = removeKeyFromMap(removeKeyFromMap(param, "{from_node_id_param_name}"), "{to_node_id_param_name}")"""
 
-        on_match = f"ON MATCH SET {RELATIONSHIP_REF_NAME} += param"
+        on_match = f"""ON MATCH SET {RELATIONSHIP_REF_NAME} += removeKeyFromMap(removeKeyFromMap(param, "{from_node_id_param_name}"), "{to_node_id_param_name}")"""
 
         return f"{match_from_node_segment} {match_to_node_segment} {merge_rel_segment} {on_create} {on_match}"
 
