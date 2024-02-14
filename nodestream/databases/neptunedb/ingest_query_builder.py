@@ -38,7 +38,7 @@ def correct_parameters(f):
 
 
 def generate_prefixed_param_name(property_name: str, prefix: str) -> str:
-    return f"__{prefix}_{property_name}"
+    return f"__{prefix}_{property_name}" if prefix else property_name
 
 def generate_id_param_name(node_ref_name: str) -> str:
     return generate_prefixed_param_name("id", node_ref_name)
@@ -77,7 +77,8 @@ def _merge_node(labels: str, node_id_param_name: str, name=GENERIC_NODE_REF_NAME
 def _make_relationship(
     rel_identity: RelationshipIdentityShape
 ):
-    keys = generate_properties_set_with_prefix(rel_identity.keys, RELATIONSHIP_REF_NAME)
+    keys = generate_properties_set_with_prefix(rel_identity.keys, None)
+
     match_rel_query = (
         QueryBuilder()
         .merge()
@@ -86,6 +87,7 @@ def _make_relationship(
             ref_name=RELATIONSHIP_REF_NAME,
             properties=keys,
             label=rel_identity.type,
+            escape = False
         )
         .node(ref_name=GENERIC_TO_NODE_REF_NAME)
     )
